@@ -3,11 +3,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import httpx
 import json
-from app.config import GROQ_API_KEY
+from app.config import CHAT_URL, llm_payload, llm_headers
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 class DirectChatRequest(BaseModel):
@@ -19,8 +18,7 @@ class DirectChatRequest(BaseModel):
 @router.post("/direct")
 async def direct_chat(request: DirectChatRequest):
     async def stream():
-        payload = {
-            "model": "llama-3.3-70b-versatile",
+        payload = llm_payload(**{
             "messages": [
                 {"role": "system", "content": request.system},
                 {"role": "user", "content": request.message},
@@ -28,16 +26,13 @@ async def direct_chat(request: DirectChatRequest):
             "max_tokens": request.max_tokens,
             "temperature": 0.4,
             "stream": True,
-        }
+        })
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
                 "POST",
-                GROQ_URL,
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json",
-                },
+                CHAT_URL,
+                headers=llm_headers(),
                 json=payload,
             ) as response:
                 async for line in response.aiter_lines():

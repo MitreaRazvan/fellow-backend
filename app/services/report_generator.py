@@ -1,9 +1,10 @@
 import httpx
 import json
-from app.config import GROQ_API_KEY
+from app.config import CHAT_URL, llm_payload, llm_headers
 from typing import AsyncGenerator
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+
 
 SYSTEM_PROMPT = """You are LUMA, an elite intelligence research agent trusted by investigative journalists, senior policy analysts, and academic researchers.
 
@@ -76,8 +77,7 @@ SOURCE MATERIAL:
 
 Critical reminder: minimum 950 words. Every section must contain genuine analysis. Do not describe — interpret. Do not summarize — evaluate."""
 
-    payload = {
-        "model": "llama-3.3-70b-versatile",
+    payload = llm_payload(**{
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": user_message},
@@ -85,16 +85,13 @@ Critical reminder: minimum 950 words. Every section must contain genuine analysi
         "max_tokens": 4096,
         "temperature": 0.35,
         "stream": True,
-    }
+    })
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
+            CHAT_URL,
+            headers=llm_headers(),
             json=payload,
         ) as response:
             async for line in response.aiter_lines():
@@ -113,8 +110,7 @@ Critical reminder: minimum 950 words. Every section must contain genuine analysi
 
 
 async def generate_suggestions(report_markdown: str) -> list[str]:
-    payload = {
-        "model": "llama-3.3-70b-versatile",
+    payload = llm_payload(**{
         "messages": [
             {
                 "role": "system",
@@ -133,22 +129,22 @@ Example: ["What lobbying expenditures did ExxonMobil report in the same quarter 
                 "content": f"Report:\n\n{report_markdown[:5000]}",
             },
         ],
-        "max_tokens": 350,
+        "max_tokens": 700,
         "temperature": 0.4,
         "stream": False,
-    }
+    })
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
+            CHAT_URL,
+            headers=llm_headers(),
             json=payload,
         )
         result = response.json()
-        text = result["choices"][0]["message"]["content"].strip()
+        choices = result.get("choices")
+        if not choices:
+            return []
+        text = (choices[0].get("message", {}).get("content") or "").strip()
         text = text.replace("```json", "").replace("```", "").strip()
         try:
             suggestions = json.loads(text)
@@ -159,8 +155,7 @@ Example: ["What lobbying expenditures did ExxonMobil report in the same quarter 
 
 async def extract_image_keywords(source_label: str, report_markdown: str) -> list[str]:
     """Ask the model what 2 Unsplash search queries would produce the best editorial photos for this report."""
-    payload = {
-        "model": "llama-3.3-70b-versatile",
+    payload = llm_payload(**{
         "messages": [
             {
                 "role": "system",
@@ -182,22 +177,22 @@ Return ONLY a JSON array of exactly 2 strings. No explanation, no markdown.""",
                 "content": f"Topic: {source_label}\n\nReport excerpt:\n{report_markdown[:1200]}",
             },
         ],
-        "max_tokens": 80,
+        "max_tokens": 200,
         "temperature": 0.3,
         "stream": False,
-    }
+    })
 
     async with httpx.AsyncClient(timeout=20.0) as client:
         response = await client.post(
-            GROQ_URL,
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
+            CHAT_URL,
+            headers=llm_headers(),
             json=payload,
         )
         result = response.json()
-        text = result["choices"][0]["message"]["content"].strip()
+        choices = result.get("choices")
+        if not choices:
+            return []
+        text = (choices[0].get("message", {}).get("content") or "").strip()
         text = text.replace("```json", "").replace("```", "").strip()
         try:
             keywords = json.loads(text)

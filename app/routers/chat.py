@@ -4,12 +4,11 @@ from pydantic import BaseModel
 import json
 import httpx
 import uuid
-from app.config import GROQ_API_KEY
+from app.config import CHAT_URL, llm_payload, llm_headers
 from app.db.database import get_connection
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -62,8 +61,7 @@ async def chat_message(request: ChatRequest):
         full_response = []
         print("STREAM STARTING - report length:", len(session["report_markdown"]))
 
-        payload = {
-            "model": "llama-3.3-70b-versatile",
+        payload = llm_payload(**{
             "messages": [
                 {"role": "system", "content": system_prompt},
                 *history
@@ -71,19 +69,26 @@ async def chat_message(request: ChatRequest):
             "max_tokens": 1024,
             "temperature": 0.4,
             "stream": True
-        }
+        })
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream(
                 "POST",
-                GROQ_URL,
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json"
-                },
+                CHAT_URL,
+                headers=llm_headers(),
                 json=payload
             ) as response:
-                print("GROQ STATUS:", response.status_code)
+                print("LLM STATUS:", response.status_code)
+                if response.status_code != 200:
+                    # A 429 (rate limit) or 5xx used to yield zero chunks, which
+                    # left the UI stuck on "Thinking..." forever. Tell the client.
+                    await response.aread()
+                    msg = ("Rate limit reached — wait a moment and try again."
+                           if response.status_code == 429
+                           else f"The model service returned {response.status_code}.")
+                    yield f"data: {json.dumps({'type': 'error', 'content': msg})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    return
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
