@@ -29,15 +29,27 @@ async def generate_report_endpoint(request: GenerateReportRequest):
         full_report = []
 
         # Stream the report chunks
-        async for chunk in generate_report(
-            session["raw_content"],
-            session["source_label"]
-        ):
-            full_report.append(chunk)
-            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+        try:
+            async for chunk in generate_report(
+                session["raw_content"],
+                session["source_label"]
+            ):
+                full_report.append(chunk)
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            return
 
         # Report complete — save it
         complete_report = "".join(full_report)
+
+        # An empty report means the provider accepted the call and returned
+        # nothing. Say so rather than saving a blank session.
+        if not complete_report.strip():
+            yield f"data: {json.dumps({'type': 'error', 'message': 'The model returned an empty report. Check the provider configuration.'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            return
 
         # Generate suggestions + image keywords in parallel
         suggestions = await generate_suggestions(complete_report)

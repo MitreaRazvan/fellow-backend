@@ -94,6 +94,14 @@ Critical reminder: minimum 950 words. Every section must contain genuine analysi
             headers=llm_headers(),
             json=payload,
         ) as response:
+            # A non-200 body is JSON, not SSE, so every line fails the
+            # "data: " check below and the stream ends up empty. That used to
+            # surface as a blank report with no error anywhere.
+            if response.status_code != 200:
+                detail = (await response.aread()).decode("utf-8", "replace")[:400]
+                raise RuntimeError(
+                    f"The model provider returned {response.status_code}. {detail}"
+                )
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue
